@@ -1,0 +1,82 @@
+const Category = require('../models/Category');
+const Product = require('../models/Product');
+const Cart = require('../models/Cart'); // make sure you have a Cart model defined
+
+// Get all categories
+const getCategories = async (_req, res) => {
+  const cats = await Category.find().sort('name');
+  res.json(cats);
+};
+
+// Get all products (with filters)
+const getProducts = async (req, res) => {
+  const { q, category } = req.query;
+  const filter = {};
+  if (q) filter.name = { $regex: q, $options: 'i' };
+  if (category) filter.category = category;
+  const prods = await Product.find(filter).populate('category').sort('-createdAt');
+  res.json(prods);
+};
+
+// Get cart by sessionId
+const getCart = async (req, res) => {
+  const { sessionId } = req.params;
+  const cart = await Cart.findOne({ sessionId }).populate('items.product');
+  res.json(cart || { sessionId, items: [] });
+};
+
+// Add item to cart
+const addToCart = async (req, res) => {
+  const { sessionId } = req.params;
+  const { productId, qty = 1 } = req.body;
+  let cart = await Cart.findOne({ sessionId });
+  if (!cart) cart = await Cart.create({ sessionId, items: [] });
+
+  const idx = cart.items.findIndex(i => i.product.toString() === productId);
+  if (idx >= 0) {
+    cart.items[idx].qty += qty;
+  } else {
+    cart.items.push({ product: productId, qty });
+  }
+
+  await cart.save();
+  await cart.populate('items.product');
+  res.status(201).json(cart);
+};
+
+// Update quantity of a cart item
+const updateCartItem = async (req, res) => {
+  const { sessionId, productId } = req.params;
+  const { qty } = req.body;
+  const cart = await Cart.findOne({ sessionId });
+  if (!cart) return res.status(404).json({ message: 'Cart not found' });
+
+  const item = cart.items.find(i => i.product.toString() === productId);
+  if (!item) return res.status(404).json({ message: 'Item not in cart' });
+
+  item.qty = Math.max(1, qty);
+  await cart.save();
+  await cart.populate('items.product');
+  res.json(cart);
+};
+
+// Remove item from cart
+const removeFromCart = async (req, res) => {
+  const { sessionId, productId } = req.params;
+  const cart = await Cart.findOne({ sessionId });
+  if (!cart) return res.status(404).json({ message: 'Cart not found' });
+
+  cart.items = cart.items.filter(i => i.product.toString() !== productId);
+  await cart.save();
+  await cart.populate('items.product');
+  res.json(cart);
+};
+
+module.exports = {
+  getCategories,
+  getProducts,
+  getCart,
+  addToCart,
+  updateCartItem,
+  removeFromCart
+};
