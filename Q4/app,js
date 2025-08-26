@@ -1,0 +1,170 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
+const session = require('express-session');
+const nodemailer = require('nodemailer');
+
+const app = express();
+
+// MongoDB connection
+mongoose.connect('mongodb://localhost:27017/erp_system');
+
+// Employee Schema
+const employeeSchema = new mongoose.Schema({
+    empId: { type: String, unique: true, required: true },
+    name: { type: String, required: true },
+    email: { type: String, required: true },
+    password: { type: String, required: true },
+    basicSalary: { type: Number, required: true },
+    allowances: { type: Number, default: 0 },
+    deductions: { type: Number, default: 0 },
+    netSalary: { type: Number }
+});
+
+employeeSchema.pre('save', function(next) {
+    this.netSalary = this.basicSalary + this.allowances - this.deductions;
+    next();
+});
+
+const Employee = mongoose.model('Employee', employeeSchema);
+
+// Session configuration
+app.use(session({
+    secret: 'admin-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 }
+}));
+
+app.set('view engine', 'ejs');
+app.use(express.urlencoded({ extended: true }));
+
+// Email configuration
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: 'your-email@gmail.com',
+        pass: 'your-app-password'
+    }
+});
+
+// Admin credentials
+const ADMIN_USERNAME = 'admin';
+const ADMIN_PASSWORD = 'admin123';
+
+// Middleware
+const requireAuth = (req, res, next) => {
+    if (req.session.admin) {
+        next();
+    } else {
+        res.redirect('/login');
+    }
+};
+
+// Generate Employee ID
+const generateEmpId = async () => {
+    const count = await Employee.countDocuments();
+    return `EMP${String(count + 1).padStart(4, '0')}`;
+};
+
+// Routes
+app.get('/', (req, res) => {
+    if (req.session.admin) {
+        res.redirect('/dashboard');
+    } else {
+        res.redirect('/login');
+    }
+});
+
+app.get('/login', (req, res) => {
+    res.render('admin-login', { error: null });
+});
+
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+        req.session.admin = { username };
+        res.redirect('/dashboard');
+    } else {
+        res.render('admin-login', { error: 'Invalid credentials' });
+    }
+});
+
+app.get('/dashboard', requireAuth, async (req, res) => {
+    const employees = await Employee.find();
+    res.render('admin-dashboard', { employees });
+});
+
+app.get('/add-employee', requireAuth, (req, res) => {
+    res.render('add-employee', { error: null });
+});
+
+app.post('/add-employee', requireAuth, async (req, res) => {
+    try {
+        const { name, email, basicSalary, allowances, deductions } = req.body;
+        
+        const empId = await generateEmpId();
+        const password = Math.random().toString(36).slice(-8);
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        const employee = new Employee({
+            empId,
+            name,
+            email,
+            password: hashedPassword,
+            basicSalary: Number(basicSalary),
+            allowances: Number(allowances) || 0,
+            deductions: Number(deductions) || 0
+        });
+        
+        await employee.save();
+        
+        // Send email (mock - configure with real email service)
+        console.log(`Email sent to ${email}: EmpID: ${empId}, Password: ${password}`);
+        
+        res.redirect('/dashboard');
+    } catch (error) {
+        res.render('add-employee', { error: error.message });
+    }
+});
+
+app.get('/edit-employee/:id', requireAuth, async (req, res) => {
+    const employee = await Employee.findById(req.params.id);
+    res.render('edit-employee', { employee, error: null });
+});
+
+app.post('/edit-employee/:id', requireAuth, async (req, res) => {
+    try {
+        const { name, email, basicSalary, allowances, deductions } = req.body;
+        
+        await Employee.findByIdAndUpdate(req.params.id, {
+            name,
+            email,
+            basicSalary: Number(basicSalary),
+            allowances: Number(allowances) || 0,
+            deductions: Number(deductions) || 0
+        });
+        
+        res.redirect('/dashboard');
+    } catch (error) {
+        const employee = await Employee.findById(req.params.id);
+        res.render('edit-employee', { employee, error: error.message });
+    }
+});
+
+app.post('/delete-employee/:id', requireAuth, async (req, res) => {
+    await Employee.findByIdAndDelete(req.params.id);
+    res.redirect('/dashboard');
+});
+
+app.post('/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) console.error(err);
+        res.redirect('/login');
+    });
+});
+
+app.listen(3003, () => {
+    console.log('Admin ERP System running on http://localhost:3003');
+});
