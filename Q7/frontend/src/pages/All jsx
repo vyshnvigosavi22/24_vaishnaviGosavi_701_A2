@@ -1,0 +1,74 @@
+import React, { useEffect, useState } from "react";
+
+export default function Categories({ token, api }) {
+  const [items, setItems] = useState([]);
+  const [name, setName] = useState("");
+
+  const fetchCats = async () => {
+    const res = await fetch(`${api}/admin/categories`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setItems(await res.json());
+  };
+
+  useEffect(() => { fetchCats(); }, []);
+
+  const add = async () => {
+    if (!name) return;
+    await fetch(`${api}/admin/categories`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ name }),
+    });
+    setName("");
+    fetchCats();
+  };
+
+  const update = async (id) => {
+    const newName = prompt("Enter new name:");
+    if (!newName) return;
+    await fetch(`${api}/admin/categories/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type":"application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: newName }),
+    });
+    fetchCats();
+  };
+
+  const del = async (id) => {
+    await fetch(`${api}/admin/categories/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    fetchCats();
+  };
+
+  return (
+    <div>
+      <h2>Categories</h2>
+      <input
+        placeholder="New category"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <button onClick={add}>Add</button>
+      <ul>
+        {items.map((c) => (
+          <li key={c._id}>
+            {c.name}
+            <button onClick={() => update(c._id)}>Edit</button>
+            <button onClick={() => del(c._id)}>Delete</button>
+          </li>
+        ))}
+      </ul>
+      <style>{`
+        input { margin-right: 8px; }
+        li { margin: 6px 0; }
+        button { margin-left: 6px; }
+      `}</style>
+    </div>
+  );
+}
